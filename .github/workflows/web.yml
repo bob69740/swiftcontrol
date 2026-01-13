@@ -43,75 +43,72 @@ jobs:
       - name: Build Web
         run: flutter build web --release --base-href "/swiftcontrol/"
 
-      - name: Pré‑nettoyage automatique : remplacer symlinks & casser hard links
+      - name: Pre-clean: replace symlinks and break hard links
         run: |
           set -euo pipefail
 
           if [ ! -d build/web ]; then
-            echo "ERREUR: build/web introuvable. Le build a-t-il réussi ?"
+            echo "ERROR: build/web not found. Did the build succeed?"
             exit 1
           fi
 
-          echo "Taille avant nettoyage:"
+          echo "Size before cleanup:"
           du -sh build/web || true
 
-          echo "Top 30 des fichiers par taille (avant nettoyage):"
+          echo "Top 30 files by size (before cleanup):"
           du -ah build/web 2>/dev/null | sort -rh | head -n 30 || true
 
-          echo "Remplacement automatique des symlinks par des copies (ou suppression si cible absente)..."
-          # Trouver et traiter les symlinks
+          echo "Replacing symlinks with copies (or removing if target missing)..."
+          # Find symlinks and process them
           find build/web -type l -print0 | while IFS= read -r -d '' f; do
             target="$(readlink "$f")"
-            echo "Symlink trouvé: $f -> $target"
-            # Si cible relative, la rendre absolue par rapport au symlink
+            echo "Symlink found: $f -> $target"
+            # Try to resolve relative targets
             if [ ! -e "$target" ]; then
-              # essai relative
               target_abs="$(realpath -m "$(dirname "$f")/$target" 2>/dev/null || true)"
               if [ -n "$target_abs" ] && [ -e "$target_abs" ]; then
                 target="$target_abs"
               fi
             fi
             if [ -e "$target" ]; then
-              rm "$f" || true
+              rm -f "$f" || true
               if [ -d "$target" ]; then
                 mkdir -p "$f"
-                # copier le contenu du dossier cible dans l'emplacement du symlink
                 cp -a "$target/." "$f/"
-                echo "Remplacé symlink dossier $f par copie de $target"
+                echo "Replaced symlink directory $f with copy of $target"
               else
                 mkdir -p "$(dirname "$f")"
                 cp -a "$target" "$f"
-                echo "Remplacé symlink fichier $f par copie de $target"
+                echo "Replaced symlink file $f with copy of $target"
               fi
             else
-              echo "CIBLE INTRouvable pour symlink: $f -> $target. Suppression du symlink."
-              rm "$f" || true
+              echo "TARGET MISSING for symlink: $f -> $target. Removing symlink."
+              rm -f "$f" || true
             fi
           done
 
-          echo "Cassage des hard links (fichiers avec nlink > 1)..."
+          echo "Breaking hard links (files with nlink > 1)..."
           find build/web -type f -links +1 -print0 | while IFS= read -r -d '' f; do
-            echo "Cassage hard link pour: $f"
+            echo "Breaking hard link for: $f"
             tmp="${f}.tmp.$$"
             cp -p "$f" "$tmp" && mv -f "$tmp" "$f"
           done
 
-          echo "Suppression des fichiers indésirables (.DS_Store)..."
+          echo "Removing unwanted files (.DS_Store)..."
           find build/web -name '.DS_Store' -delete || true
 
-          echo "Vérification après nettoyage..."
+          echo "Verification after cleanup..."
           du -sh build/web || true
-          echo "Top 30 des fichiers par taille (après nettoyage):"
+          echo "Top 30 files by size (after cleanup):"
           du -ah build/web 2>/dev/null | sort -rh | head -n 30 || true
 
-          # Vérifier taille totale < 10 GB
-          # Sur macOS, du -sk donne la taille en KB
+          # Verify total size < 10 GB
           size_kb=$(du -sk build/web | cut -f1 || echo 0)
           size_bytes=$((size_kb * 1024))
-          echo "Taille totale (bytes): $size_bytes"
+          echo "Total size (bytes): $size_bytes"
           max_bytes=$((10 * 1024 * 1024 * 1024))
           if [ "$size_bytes" -ge "$max_bytes" ]; then
-            echo "ERREUR: taille de build/web >= 10GB ($size_bytes bytes). Réduis la taille avant deploy."
+            echo "ERROR: build/web size >= 10GB ($size_bytes bytes). Reduce size before deploy."
             exit 1
           fi
 
