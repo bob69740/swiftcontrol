@@ -43,4 +43,94 @@ jobs:
       - name: Build Web
         run: flutter build web --release --base-href "/swiftcontrol/"
 
-      - name: Pré‑nettoyage automatique : remplacer
+      - name: Pré‑nettoyage automatique : remplacer symlinks & casser hard links
+        run: |
+          set -euo pipefail
+
+          if [ ! -d build/web ]; then
+            echo "ERREUR: build/web introuvable. Le build a-t-il réussi ?"
+            exit 1
+          fi
+
+          echo "Taille avant nettoyage:"
+          du -sh build/web || true
+
+          echo "Top 30 des fichiers par taille (avant nettoyage):"
+          du -ah build/web 2>/dev/null | sort -rh | head -n 30 || true
+
+          echo "Remplacement automatique des symlinks par des copies (ou suppression si cible absente)..."
+          # Trouver et traiter les symlinks
+          find build/web -type l -print0 | while IFS= read -r -d '' f; do
+            target="$(readlink "$f")"
+            echo "Symlink trouvé: $f -> $target"
+            # Si cible relative, la rendre absolue par rapport au symlink
+            if [ ! -e "$target" ]; then
+              # essai relative
+              target_abs="$(realpath -m "$(dirname "$f")/$target" 2>/dev/null || true)"
+              if [ -n "$target_abs" ] && [ -e "$target_abs" ]; then
+                target="$target_abs"
+              fi
+            fi
+            if [ -e "$target" ]; then
+              rm "$f" || true
+              if [ -d "$target" ]; then
+                mkdir -p "$f"
+                # copier le contenu du dossier cible dans l'emplacement du symlink
+                cp -a "$target/." "$f/"
+                echo "Remplacé symlink dossier $f par copie de $target"
+              else
+                mkdir -p "$(dirname "$f")"
+                cp -a "$target" "$f"
+                echo "Remplacé symlink fichier $f par copie de $target"
+              fi
+            else
+              echo "CIBLE INTRouvable pour symlink: $f -> $target. Suppression du symlink."
+              rm "$f" || true
+            fi
+          done
+
+          echo "Cassage des hard links (fichiers avec nlink > 1)..."
+          find build/web -type f -links +1 -print0 | while IFS= read -r -d '' f; do
+            echo "Cassage hard link pour: $f"
+            tmp="${f}.tmp.$$"
+            cp -p "$f" "$tmp" && mv -f "$tmp" "$f"
+          done
+
+          echo "Suppression des fichiers indésirables (.DS_Store)..."
+          find build/web -name '.DS_Store' -delete || true
+
+          echo "Vérification après nettoyage..."
+          du -sh build/web || true
+          echo "Top 30 des fichiers par taille (après nettoyage):"
+          du -ah build/web 2>/dev/null | sort -rh | head -n 30 || true
+
+          # Vérifier taille totale < 10 GB
+          # Sur macOS, du -sk donne la taille en KB
+          size_kb=$(du -sk build/web | cut -f1 || echo 0)
+          size_bytes=$((size_kb * 1024))
+          echo "Taille totale (bytes): $size_bytes"
+          max_bytes=$((10 * 1024 * 1024 * 1024))
+          if [ "$size_bytes" -ge "$max_bytes" ]; then
+            echo "ERREUR: taille de build/web >= 10GB ($size_bytes bytes). Réduis la taille avant deploy."
+            exit 1
+          fi
+
+      - name: Upload static files as artifact (unique name)
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-pages-web
+          path: build/web
+
+      - name: List artifacts for this run (debug)
+        run: |
+          echo "Listing artifacts for run $GITHUB_RUN_ID"
+          curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
+            || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Web Deploy
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-web
