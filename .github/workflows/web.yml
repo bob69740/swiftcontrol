@@ -59,11 +59,9 @@ jobs:
           du -ah build/web 2>/dev/null | sort -rh | head -n 30 || true
 
           echo "Replacing symlinks with copies (or removing if target missing)..."
-          # Find symlinks and process them
           find build/web -type l -print0 | while IFS= read -r -d '' f; do
             target="$(readlink "$f")"
             echo "Symlink found: $f -> $target"
-            # Try to resolve relative targets
             if [ ! -e "$target" ]; then
               target_abs="$(realpath -m "$(dirname "$f")/$target" 2>/dev/null || true)"
               if [ -n "$target_abs" ] && [ -e "$target_abs" ]; then
@@ -102,7 +100,6 @@ jobs:
           echo "Top 30 files by size (after cleanup):"
           du -ah build/web 2>/dev/null | sort -rh | head -n 30 || true
 
-          # Verify total size < 10 GB
           size_kb=$(du -sk build/web | cut -f1 || echo 0)
           size_bytes=$((size_kb * 1024))
           echo "Total size (bytes): $size_bytes"
