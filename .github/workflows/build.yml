@@ -257,16 +257,16 @@ jobs:
           echo "VERSION=$version" >> $GITHUB_ENV
 
         #13 Create Release
-#      - name: Create Release
-#        if: inputs.build_github
-#        uses: ncipollo/release-action@v1
-#        with:
-#          artifacts: "build/app/outputs/flutter-apk/BikeControl.android.apk,build/macos/Build/Products/Release/BikeControl.macos.zip"
-#          allowUpdates: true
-#          prerelease: true
-#          bodyFile: /tmp/release_body.md
-#          tag: v${{ env.VERSION }}
-#          token: ${{ secrets.TOKEN }}
+      - name: Create Release
+        if: inputs.build_github
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "build/app/outputs/flutter-apk/BikeControl.android.apk,build/macos/Build/Products/Release/BikeControl.macos.zip"
+          allowUpdates: true
+          prerelease: true
+          bodyFile: /tmp/release_body.md
+          tag: v${{ env.VERSION }}
+          token: ${{ secrets.TOKEN }}
 
   windows:
     if: inputs.build_windows
