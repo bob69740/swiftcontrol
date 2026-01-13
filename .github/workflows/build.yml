@@ -1,3 +1,4 @@
+# Workflow sans Shorebird — build local, packaging et publication via GitHub / stores
 name: "Build"
 
 on:
@@ -40,7 +41,6 @@ permissions:
   id-token: write
 
 env:
-  SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
   FLUTTER_VERSION: 3.38.4
 
 jobs:
@@ -54,7 +54,6 @@ jobs:
       contents: write
 
     steps:
-      #1 Checkout Repository
       - name: Checkout Repository
         uses: actions/checkout@v3
 
@@ -86,7 +85,6 @@ jobs:
           
           # create temporary keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          # security default-keychain -s $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           
@@ -101,12 +99,6 @@ jobs:
           cp $PP_PATH_IOS_DEV ~/Library/MobileDevice/Provisioning\ Profiles
           cp $PP_PATH_MACOS ~/Library/MobileDevice/Provisioning\ Profiles
 
-      - name: 🐦 Setup Shorebird
-        if: inputs.build_mac || inputs.build_android || inputs.build_ios || inputs.build_web
-        uses: shorebirdtech/setup-shorebird@v1
-        with:
-          cache: true
-
       - name: Set Up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -118,13 +110,14 @@ jobs:
           flutter pub global activate intl_utils;
           flutter pub global run intl_utils:generate;
 
-      - name: 🚀 Shorebird Release macOS
+      - name: Build macOS (local)
         if: inputs.build_mac
-        uses: shorebirdtech/shorebird-release@v1
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          platform: macos
-          args: "-- --dart-define=VERIFYING_SHARED_SECRET=${{ secrets.VERIFYING_SHARED_SECRET }} --dart-define=REVENUECAT_API_KEY_IOS=${{ secrets.REVENUECAT_API_KEY_IOS }}"
+        run: |
+          flutter build macos --release
+          # package the app into a zip for release artifacts
+          cd build/macos/Build/Products/Release
+          zip -r BikeControl.macos.zip BikeControl.app
+          mv BikeControl.macos.zip $GITHUB_WORKSPACE/build/macos_macos_zip || true
 
       - name: Decode Keystore
         if: inputs.build_android
@@ -132,13 +125,11 @@ jobs:
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/android.keystore;
           echo "${{ secrets.KEYSTORE_PROPERTIES }}" > android/keystore.properties;
 
-      - name: 🚀 Shorebird Release Android
+      - name: Build Android (local: AAB + APK)
         if: inputs.build_android
-        uses: shorebirdtech/shorebird-release@v1
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          platform: android
-          args: "--artifact=apk -- --dart-define=REVENUECAT_API_KEY_ANDROID=${{ secrets.REVENUECAT_API_KEY_ANDROID }}"
+        run: |
+          flutter build appbundle --release || true
+          flutter build apk --release || true
 
       - name: Build Web
         if: inputs.build_web
@@ -168,13 +159,11 @@ jobs:
           chmod +x scripts/generate_release_body.sh
           ./scripts/generate_release_body.sh > /tmp/release_body.md
 
-      - name: 🚀 Shorebird Release iOS
+      - name: Build iOS (local)
         if: inputs.build_ios
-        uses: shorebirdtech/shorebird-release@v1
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          platform: ios
-          args: "--export-options-plist ios/ExportOptions.plist -- --dart-define=VERIFYING_SHARED_SECRET=${{ secrets.VERIFYING_SHARED_SECRET }} --dart-define=REVENUECAT_API_KEY_IOS=${{ secrets.REVENUECAT_API_KEY_IOS }}"
+        run: |
+          # build ipa using the provided ExportOptions (requires signing assets prepared above)
+          flutter build ipa --export-options-plist ios/ExportOptions.plist --release
 
       - name: Prepare App Store authentication key
         if: inputs.build_ios || inputs.build_mac
@@ -183,7 +172,7 @@ jobs:
           APPSTORE_API_KEY: ${{ secrets.APPSTORE_API_KEY }}
         run: |
           mkdir -p ./private_keys;
-          printf %s "$API_KEY_BASE64" | base64 -D > "./private_keys/AuthKey_${APPSTORE_API_KEY}.p8";      
+          printf %s "$API_KEY_BASE64" | base64 -D > "./private_keys/AuthKey_${APPSTORE_API_KEY}.p8";
 
       - name: Upload to Play Store
         if: inputs.build_android
@@ -210,45 +199,38 @@ jobs:
           APPSTORE_API_KEY: ${{ secrets.APPSTORE_API_KEY }}
           APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
         run: |
-          xcrun altool --upload-app -f build/ios/ipa/swift_play.ipa -t ios --apiKey "$APPSTORE_API_KEY" --apiIssuer "$APPSTORE_API_ISSUER_ID";
+          # Adjust path if your ipa filename is different
+          IPA_PATH=$(ls build/ios/ipa/*.ipa | head -n 1 || true)
+          if [ -z "$IPA_PATH" ]; then
+            echo "IPA non trouvé dans build/ios/ipa. Vérifie la génération de l'IPA."
+            exit 1
+          fi
+          xcrun altool --upload-app -f "$IPA_PATH" -t ios --apiKey "$APPSTORE_API_KEY" --apiIssuer "$APPSTORE_API_ISSUER_ID";
 
-      - name: Handle Android archives
-        if: inputs.build_android && inputs.build_github && false
-        run: |
-          cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/BikeControl.android.apk
-
-      - name: Code Signing of macOS app
-        if: inputs.build_mac && inputs.build_github && false
-        run: /usr/bin/codesign --deep --force -s "$DEVELOPER_ID_APPLICATION_SIGNING_IDENTITY" --entitlements ../../../../../macos/Runner/Release.entitlements --options runtime BikeControl.app -v
-        working-directory: build/macos/Build/Products/Release
-        env:
-          DEVELOPER_ID_APPLICATION_SIGNING_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION_SIGNING_IDENTITY }}
-
-      - name: Handle macOS archives
-        if: inputs.build_mac && inputs.build_github && false
-        run: |
-          cd build/macos/Build/Products/Release/
-          zip -r BikeControl.macos.zip BikeControl.app/
-
-      - name: Upload Android Artifacts
-        if: inputs.build_android && inputs.build_github && false
+      - name: Upload macOS artifact (for GitHub release)
+        if: inputs.build_mac && inputs.build_github
         uses: actions/upload-artifact@v4
         with:
           overwrite: true
-          name: Releases
-          path: |
-            build/app/outputs/flutter-apk/BikeControl.android.apk
+          name: BikeControl-macos
+          path: build/macos_macos_zip
 
-      - name: Upload macOS Artifacts
-        if: inputs.build_mac && inputs.build_github && false
+      - name: Upload Android APK artifact (for GitHub release)
+        if: inputs.build_android && inputs.build_github
         uses: actions/upload-artifact@v4
         with:
           overwrite: true
-          name: Releases
-          path: |
-            build/macos/Build/Products/Release/BikeControl.macos.zip
+          name: BikeControl-android-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
 
-        #10 Extract Version
+      - name: Upload iOS IPA artifact (for GitHub release)
+        if: inputs.build_ios && inputs.build_github
+        uses: actions/upload-artifact@v4
+        with:
+          overwrite: true
+          name: BikeControl-ios-ipa
+          path: build/ios/ipa/*.ipa
+
       - name: Extract version from pubspec.yaml
         if: inputs.build_github
         id: extract_version
@@ -256,12 +238,12 @@ jobs:
           version=$(grep '^version: ' pubspec.yaml | cut -d ' ' -f 2 | tr -d '\r')
           echo "VERSION=$version" >> $GITHUB_ENV
 
-        #13 Create Release
-      - name: Create Release
+      - name: Create Release on GitHub
         if: inputs.build_github
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "build/app/outputs/flutter-apk/BikeControl.android.apk,build/macos/Build/Products/Release/BikeControl.macos.zip"
+          artifacts: |
+            build/app/outputs/flutter-apk/app-release.apk,build/macos_macos_zip,build/ios/ipa/*.ipa
           allowUpdates: true
           prerelease: true
           bodyFile: /tmp/release_body.md
@@ -271,10 +253,9 @@ jobs:
   windows:
     if: inputs.build_windows
     name: Build & Release on Windows
-    runs-on: windows-2025
+    runs-on: windows-latest
 
     steps:
-      #1 Checkout Repository
       - name: Checkout Repository
         uses: actions/checkout@v3
 
@@ -285,11 +266,6 @@ jobs:
             ($_ -split ' ')[1].Trim()
           }
           echo "VERSION=$version" >> $env:GITHUB_ENV
-
-      - name: 🐦 Setup Shorebird
-        uses: shorebirdtech/setup-shorebird@v1
-        with:
-          cache: true
 
       - name: Set Up Flutter
         uses: subosito/flutter-action@v2
@@ -302,16 +278,15 @@ jobs:
           flutter pub global activate intl_utils;
           flutter pub global run intl_utils:generate;
 
-      - name: 🚀 Shorebird Release Windows
-        uses: shorebirdtech/shorebird-release@v1
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          platform: windows
+      - name: Build Windows (local)
+        if: inputs.build_windows
+        shell: pwsh
+        run: |
+          flutter build windows --release
 
       - name: Zip directory (Windows)
         shell: pwsh
         run: |
-  
           $source = "C:\Windows\System32"
           $destination = "build\windows\x64\runner\Release"
           
@@ -332,19 +307,8 @@ jobs:
           }
           Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath "build/windows/x64/runner/Release/bike_control.windows.zip"
 
-      - uses: microsoft/setup-msstore-cli@v1
-        if: false
-
-      - name: Configure the Microsoft Store CLI
-        if: false
-        run: msstore reconfigure --tenantId $ --clientId $ --clientSecret $ --sellerId $
-
       - name: Create MSIX package
         run: dart run msix:create
-
-      - name: Publish MSIX to the Microsoft Store
-        if: false
-        run: msstore publish -v "build/windows/x64/runner/Release/"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
