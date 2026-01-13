@@ -19,21 +19,16 @@ jobs:
       - name: Extract version from pubspec.yaml
         shell: pwsh
         run: |
-          # Vérifier que le fichier existe
           if (-not (Test-Path pubspec.yaml)) {
-            Write-Error "pubspec.yaml introuvable dans le répertoire racine. Vérifie le chemin ou déplace le workflow."
+            Write-Error "pubspec.yaml introuvable dans le répertoire racine."
             exit 1
           }
-
-          # Lire tout le fichier et chercher la clé version: en mode multi-ligne
           $content = Get-Content pubspec.yaml -Raw
           $m = [regex]::Match($content, '^\s*version\s*:\s*("?)(?<v>[^"\r\n]+)\1', [System.Text.RegularExpressions.RegexOptions]::Multiline)
-
           if (-not $m.Success) {
-            Write-Error "Impossible de trouver la ligne 'version:' dans pubspec.yaml. Format attendu : version: 1.2.3+4 (avec ou sans guillemets)."
+            Write-Error "Impossible de trouver la ligne 'version:' dans pubspec.yaml."
             exit 1
           }
-
           $version = $m.Groups['v'].Value.Trim()
           Write-Host "Version trouvée: $version"
           Add-Content -Path $env:GITHUB_ENV -Value "VERSION=$version"
@@ -49,6 +44,15 @@ jobs:
         run: |
           flutter pub get
 
+      - name: Generate translation files (intl_utils)
+        shell: pwsh
+        run: |
+          # Génération des fichiers de localisation utilisés par l'application
+          flutter pub global activate intl_utils
+          flutter pub global run intl_utils:generate
+        # Alternative: si tu utilises flutter's gen-l10n, remplace par:
+        # run: flutter gen-l10n
+
       - name: Build Windows (release)
         shell: pwsh
         run: |
@@ -62,7 +66,6 @@ jobs:
             Write-Error "Répertoire de build introuvable: $releaseDir"
             exit 1
           }
-          # DLLs nécessaires (ajoute ou retire si besoin)
           $dlls = @("msvcp140.dll","vcruntime140.dll","vcruntime140_1.dll")
           $systemDir = Join-Path $env:windir "System32"
           foreach ($dll in $dlls) {
@@ -75,15 +78,13 @@ jobs:
               Write-Warning "$dll introuvable dans $systemDir — vérifie si nécessaire"
             }
           }
-          # create zip named with version
           if (-not $env:VERSION) {
-            Write-Error "VERSION non défini. L'étape d'extraction de version a échoué ou n'a pas été exécutée."
+            Write-Error "VERSION non défini."
             exit 1
           }
           $zipName = "bike_control.windows.$($env:VERSION).zip"
           $zipPath = Join-Path $releaseDir $zipName
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-          # Compress all files in the release directory into the zip
           Compress-Archive -Path (Join-Path $releaseDir "*") -DestinationPath $zipPath -Force
           Write-Host "Created zip: $zipPath"
 
