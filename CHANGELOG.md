@@ -1,3 +1,12 @@
+### 4.4.0 (16-01-2026)
+
+**Features**:
+- Support for Thinkrider VS200
+
+**Fixes**:
+- Android: Local connection method allows passing keyboard events to the trainer app
+- macOS: Compatibility with macOS Tahoe
+
 ### 4.3.0 (07-01-2026)
 
 **Features**:
