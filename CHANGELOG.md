@@ -1,10 +1,11 @@
-### 4.5.0 (unreleased)
+### 4.5.0 (22-01-2026)
 
 **Features**:
 - Android: simulate additional actions for local connection method (Left, Down, Right, Up, Select, Back, Home, Recent Apps)
-  - control your phone 
+  - control your phone with your controller
   - control UI within the trainer app (if supported)
 - BikeControl now supports individual mapping when you use more than one Cycplus BC2 and ThinkRider VS200 controller
+- Windows & macOS: allow configuration of volume keys on Bluetooth HID devices
 
 ### 4.4.0 (16-01-2026)
 
