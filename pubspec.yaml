@@ -93,6 +93,7 @@ dependency_overrides:
 
 flutter:
   uses-material-design: true
+  generate: true # <--- Activé pour permettre la génération de localizations
   assets:
     - CHANGELOG.md
     - TROUBLESHOOTING.md
