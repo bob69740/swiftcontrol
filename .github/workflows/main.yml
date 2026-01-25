@@ -38,8 +38,11 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
-      - name: Generate translation files (gen-l10n)
-        run: flutter gen-l10n
+      - name: Generate translation files
+        run: flutter pub run intl_utils:generate
+
+#      - name: Generate translation files (gen-l10n)
+#        run: flutter gen-l10n
 
       - name: Build Windows (release)
         run: flutter build windows --release
