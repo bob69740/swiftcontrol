@@ -47,13 +47,18 @@ jobs:
       - name: Bundle DLLs and create zip
         shell: pwsh
         run: |
-          $releaseDir = "build\windows\runner\Release"
+          # Définition de chemins absolus
+          $currentDir = Get-Location
+          $releaseDir = Join-Path $currentDir "build\windows\runner\Release"
+          
+          Write-Host "Vérification de l'existence du dossier : $releaseDir"
+          
           if (-not (Test-Path $releaseDir)) {
-            Write-Error "Répertoire de build introuvable: $releaseDir. Le build a dû échouer."
+            Write-Error "Répertoire de build introuvable : $releaseDir. Vérifiez les logs de l'étape de compilation précédente."
             exit 1
           }
 
-          # DLLs VC++ (essentielles pour faire tourner l'exe sur des PC sans Visual Studio)
+          # Copie des DLLs VC++ système
           $dlls = @("msvcp140.dll","vcruntime140.dll","vcruntime140_1.dll")
           $systemDir = Join-Path $env:windir "System32"
 
@@ -66,24 +71,29 @@ jobs:
           }
 
           if (-not $env:VERSION) {
-            Write-Error "VERSION non défini."
+            Write-Error "La variable d'environnement VERSION est manquante."
             exit 1
           }
 
-          # Création du ZIP à la racine pour éviter que Compress-Archive ne boucle sur lui-même
+          # Préparation du ZIP
           $zipName = "bike_control.windows.$($env:VERSION).zip"
-          Write-Host "Zipping contents of $releaseDir into $zipName..."
+          $zipPathAtRoot = Join-Path $currentDir $zipName
+          $finalZipPath = Join-Path $releaseDir $zipName
+
+          Write-Host "Création de l'archive : $zipName"
+          Compress-Archive -Path "$releaseDir\*" -DestinationPath $zipPathAtRoot -Force
           
-          Compress-Archive -Path "$releaseDir\*" -DestinationPath $zipName -Force
-          
-          # Déplacement du ZIP final dans le dossier Release pour l'upload
-          Move-Item -Path $zipName -Destination (Join-Path $releaseDir $zipName) -Force
-          Write-Host "Created and moved zip: $zipName"
+          # On déplace le ZIP final dans le dossier Release pour l'étape d'upload
+          Move-Item -Path $zipPathAtRoot -Destination $finalZipPath -Force
+          Write-Host "Archive déplacée vers : $finalZipPath"
 
       - name: List packaged files (debug)
         shell: pwsh
         run: |
-          Get-ChildItem -Path build\windows\runner\Release | Select-Object Name,Length
+          $releaseDir = "build\windows\runner\Release"
+          if (Test-Path $releaseDir) {
+            Get-ChildItem -Path $releaseDir | Select-Object Name, Length
+          }
 
       - name: Upload Windows EXE artifact
         uses: actions/upload-artifact@v4
