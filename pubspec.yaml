@@ -107,7 +107,7 @@ flutter:
 
 flutter_intl:
   enabled: true
-  arb_dir: lib/l10n
+  arb_dir: lib/i10n
   class_name: AppLocalizations
   output_dir: lib/gen
 
