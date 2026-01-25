@@ -38,11 +38,8 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
-      - name: Generate translation files
+      - name: Generate translation files (intl_utils)
         run: flutter pub run intl_utils:generate
-
-#      - name: Generate translation files (gen-l10n)
-#        run: flutter gen-l10n
 
       - name: Build Windows (release)
         run: flutter build windows --release
@@ -50,22 +47,21 @@ jobs:
       - name: Bundle DLLs and create zip
         shell: pwsh
         run: |
-          $releaseDir = Join-Path $PWD "build\windows\runner\Release"
+          $releaseDir = "build\windows\runner\Release"
           if (-not (Test-Path $releaseDir)) {
-            Write-Error "Répertoire de build introuvable: $releaseDir"
+            Write-Error "Répertoire de build introuvable: $releaseDir. Le build a dû échouer."
             exit 1
           }
 
-          # DLLs VC++ (optionnelles mais utiles pour compatibilité)
+          # DLLs VC++ (essentielles pour faire tourner l'exe sur des PC sans Visual Studio)
           $dlls = @("msvcp140.dll","vcruntime140.dll","vcruntime140_1.dll")
           $systemDir = Join-Path $env:windir "System32"
 
           foreach ($dll in $dlls) {
             $src = Join-Path $systemDir $dll
-            $dest = Join-Path $releaseDir $dll
             if (Test-Path $src) {
-              Copy-Item -Path $src -Destination $dest -Force
-              Write-Host "Copied $dll"
+              Copy-Item -Path $src -Destination $releaseDir -Force
+              Write-Host "Copied $dll to $releaseDir"
             }
           }
 
@@ -74,12 +70,15 @@ jobs:
             exit 1
           }
 
+          # Création du ZIP à la racine pour éviter que Compress-Archive ne boucle sur lui-même
           $zipName = "bike_control.windows.$($env:VERSION).zip"
-          $zipPath = Join-Path $releaseDir $zipName
-          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-
-          Compress-Archive -Path (Join-Path $releaseDir "*") -DestinationPath $zipPath -Force
-          Write-Host "Created zip: $zipPath"
+          Write-Host "Zipping contents of $releaseDir into $zipName..."
+          
+          Compress-Archive -Path "$releaseDir\*" -DestinationPath $zipName -Force
+          
+          # Déplacement du ZIP final dans le dossier Release pour l'upload
+          Move-Item -Path $zipName -Destination (Join-Path $releaseDir $zipName) -Force
+          Write-Host "Created and moved zip: $zipName"
 
       - name: List packaged files (debug)
         shell: pwsh
