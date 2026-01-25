@@ -17,17 +17,16 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path pubspec.yaml)) {
-            Write-Error "pubspec.yaml introuvable dans le répertoire racine."
+            Write-Error "pubspec.yaml introuvable."
             exit 1
           }
           $content = Get-Content pubspec.yaml -Raw
           $m = [regex]::Match($content, '^\s*version\s*:\s*("?)(?<v>[^"\r\n]+)\1', [System.Text.RegularExpressions.RegexOptions]::Multiline)
           if (-not $m.Success) {
-            Write-Error "Impossible de trouver la ligne 'version:' dans pubspec.yaml."
+            Write-Error "Version introuvable dans pubspec.yaml."
             exit 1
           }
           $version = $m.Groups['v'].Value.Trim()
-          Write-Host "Version trouvée: $version"
           Add-Content -Path $env:GITHUB_ENV -Value "VERSION=$version"
 
       - name: Set up Flutter
@@ -38,62 +37,40 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
-      - name: Generate translation files (intl_utils)
-        run: flutter pub run intl_utils:generate
+      - name: Clean and Generate (intl_utils)
+        run: |
+          flutter clean
+          flutter pub get
+          flutter pub run intl_utils:generate
 
       - name: Build Windows (release)
+        # On ajoute --verbose pour voir exactement pourquoi ça échoue si ça plante
         run: flutter build windows --release
 
       - name: Bundle DLLs and create zip
         shell: pwsh
         run: |
-          # Définition de chemins absolus
           $currentDir = Get-Location
           $releaseDir = Join-Path $currentDir "build\windows\runner\Release"
           
-          Write-Host "Vérification de l'existence du dossier : $releaseDir"
-          
           if (-not (Test-Path $releaseDir)) {
-            Write-Error "Répertoire de build introuvable : $releaseDir. Vérifiez les logs de l'étape de compilation précédente."
+            Write-Error "ERREUR CRITIQUE : Le dossier de build n'a pas été créé par Flutter."
+            Write-Host "Vérifiez les erreurs de compilation Dart dans l'étape précédente."
             exit 1
           }
 
-          # Copie des DLLs VC++ système
+          # Copie des DLLs
           $dlls = @("msvcp140.dll","vcruntime140.dll","vcruntime140_1.dll")
-          $systemDir = Join-Path $env:windir "System32"
-
           foreach ($dll in $dlls) {
-            $src = Join-Path $systemDir $dll
-            if (Test-Path $src) {
-              Copy-Item -Path $src -Destination $releaseDir -Force
-              Write-Host "Copied $dll to $releaseDir"
-            }
+            $src = Join-Path $env:windir "System32\$dll"
+            if (Test-Path $src) { Copy-Item -Path $src -Destination $releaseDir -Force }
           }
 
-          if (-not $env:VERSION) {
-            Write-Error "La variable d'environnement VERSION est manquante."
-            exit 1
-          }
-
-          # Préparation du ZIP
+          # Packaging
           $zipName = "bike_control.windows.$($env:VERSION).zip"
           $zipPathAtRoot = Join-Path $currentDir $zipName
-          $finalZipPath = Join-Path $releaseDir $zipName
-
-          Write-Host "Création de l'archive : $zipName"
           Compress-Archive -Path "$releaseDir\*" -DestinationPath $zipPathAtRoot -Force
-          
-          # On déplace le ZIP final dans le dossier Release pour l'étape d'upload
-          Move-Item -Path $zipPathAtRoot -Destination $finalZipPath -Force
-          Write-Host "Archive déplacée vers : $finalZipPath"
-
-      - name: List packaged files (debug)
-        shell: pwsh
-        run: |
-          $releaseDir = "build\windows\runner\Release"
-          if (Test-Path $releaseDir) {
-            Get-ChildItem -Path $releaseDir | Select-Object Name, Length
-          }
+          Move-Item -Path $zipPathAtRoot -Destination (Join-Path $releaseDir $zipName) -Force
 
       - name: Upload Windows EXE artifact
         uses: actions/upload-artifact@v4
